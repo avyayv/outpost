@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""Run from this checkout. No Python packages required."""
+import argparse
+import datetime
+from contextlib import closing
+import json
+import os
+import re
+import secrets
+import shlex
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+CONFIG = ROOT / "outpost.json"
+
+
+def ssh(config, command, **kwargs):
+    return subprocess.run(["ssh", "-o", "BatchMode=yes", config["host"], command], check=True, **kwargs)
+
+
+def remote(config, command, **kwargs):
+    return ssh(config, "set -eu; cd " + shlex.quote(config["directory"]) + "; " + command, **kwargs)
+
+
+def backup(config, destination):
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Backups contain app data. Create private files and never leave a truncated
+    # file looking like a successful backup.
+    with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as output:
+        os.chmod(output.name, 0o600)
+        temporary = Path(output.name)
+        try:
+            remote(config, "docker compose exec -T api python /app/backup.py export", stdout=output)
+            output.flush()
+            os.fsync(output.fileno())
+            os.link(temporary, destination)  # Refuse to overwrite an existing backup.
+        finally:
+            temporary.unlink(missing_ok=True)
+    print(f"Backup saved: {destination}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Deploy a SQLite API to an existing Docker/Traefik server")
+    commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser("init", help="Create local config and a secret; makes no remote changes")
+    init.add_argument("--domain", required=True)
+    init.add_argument("--host", default="hetzner", help="SSH config alias")
+    init.add_argument("--name", default="notes")
+    for name in ("deploy", "status", "logs"):
+        commands.add_parser(name)
+    export = commands.add_parser("backup", help="Download a consistent backup to this machine")
+    export.add_argument("output", type=Path)
+    restore = commands.add_parser("restore", help="Back up current data, stop API, restore, restart")
+    restore.add_argument("input", type=Path)
+    restore.add_argument("--yes", action="store_true", help="Confirm replacing all current records")
+    args = parser.parse_args()
+    if args.command == "init":
+        if any((ROOT / path).exists() for path in ("outpost.json", ".env", "secrets/api_token")):
+            parser.error("Already configured; edit outpost.json/.env manually, do not regenerate the token")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", args.name):
+            parser.error("Name must be lowercase letters/digits/hyphens, starting with a letter (max 40)")
+        if len(args.domain) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+", args.domain):
+            parser.error("Expected a lowercase DNS hostname")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", args.host):
+            parser.error("Expected an SSH alias or user@hostname")
+        if (ROOT / "secrets").exists():
+            parser.error("secrets/ exists already; inspect it manually before initializing")
+        (ROOT / "secrets").mkdir(mode=0o700)
+        token = ROOT / "secrets/api_token"
+        # Container UID can read; host directory is private (0700).
+        fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        with os.fdopen(fd, "w") as stream:
+            stream.write(secrets.token_hex(32) + "\n")
+        (ROOT / ".env").write_text(f"COMPOSE_PROJECT_NAME=outpost-{args.name}\nAPP_DOMAIN={args.domain}\n")
+        CONFIG.write_text(json.dumps({"host": args.host, "directory": f"/srv/outpost/{args.name}"}, indent=2) + "\n")
+        print("Configured locally. Set DNS, then run ./outpost deploy. Token is in secrets/api_token.")
+        return
+    if not CONFIG.exists():
+        parser.error("Run ./outpost init first")
+    config = json.loads(CONFIG.read_text())
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", config["host"]):
+        parser.error("Invalid SSH host")
+    if args.command == "deploy":
+        subprocess.run(["docker", "compose", "config", "--quiet"], cwd=ROOT, check=True)
+        directory = shlex.quote(config["directory"])
+        ssh(config, f"set -eu; docker compose version >/dev/null; docker network inspect traefik-network >/dev/null; "
+            f"if [ -e {directory} ] && [ ! -f {directory}/.outpost ]; then echo 'Refusing to adopt an existing directory' >&2; exit 1; fi; "
+            f"mkdir -p {directory}; chmod 700 {directory}; touch {directory}/.outpost")
+        with tempfile.TemporaryFile() as archive:
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                for item in ("api", "Dockerfile", "compose.yaml", ".env", "secrets/api_token"):
+                    tar.add(ROOT / item, arcname=item, filter=lambda info: None if "__pycache__" in info.name else info)
+            archive.seek(0)
+            remote(config, "tar -xf -; docker compose up -d --build --wait --wait-timeout 60", stdin=archive)
+        print("Deployed. Verify HTTPS from a client; Compose health checks only verify the API internally.")
+    elif args.command == "status":
+        remote(config, "docker compose ps")
+    elif args.command == "logs":
+        remote(config, "docker compose logs --tail=100 api")
+    elif args.command == "backup":
+        backup(config, args.output)
+    elif args.command == "restore":
+        if not args.yes:
+            parser.error("Restore replaces current records. Pass --yes to confirm")
+        if not args.input.is_file():
+            parser.error("Backup file does not exist")
+        import sqlite3
+        sys.path.insert(0, str(ROOT / "api"))
+        from backup import check
+        with closing(sqlite3.connect(args.input.resolve().as_uri() + "?mode=ro", uri=True)) as db:
+            check(db)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup(config, ROOT / "backups" / f"before-restore-{stamp}.sqlite3")
+        remote(config, "docker compose stop api")
+        try:
+            with args.input.open("rb") as stream:
+                remote(config, "docker compose run --rm -T --no-deps api python /app/backup.py restore", stdin=stream)
+        finally:
+            remote(config, "docker compose up -d --wait --wait-timeout 60 api")
+        print("Restored and restarted.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as error:
+        raise SystemExit(f"outpost: {error}")
