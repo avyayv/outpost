@@ -1,9 +1,11 @@
 import io
 import json
+import os
 import sqlite3
 import sys
 import tempfile
 import threading
+import subprocess
 import unittest
 import urllib.error
 import urllib.request
@@ -18,6 +20,27 @@ TOKEN = "a" * 64
 
 
 class APITest(unittest.TestCase):
+    def test_init_scaffolds_an_app_from_an_installed_cli(self):
+        if Path.cwd().joinpath("outpost.json").exists():
+            self.skipTest("CLI init integration test runs in the repository, not an initialized app")
+        cli = Path(__file__).resolve().parents[1] / "outpost"
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "HOME": directory}
+            result = subprocess.run(
+                [sys.executable, str(cli), "init", "--domain", "api.example.com", "--host", "example", "--name", "smoke"],
+                cwd=directory, env=env, text=True, capture_output=True, check=True,
+            )
+            root = Path(directory)
+            self.assertTrue((root / "api/server.py").is_file())
+            self.assertTrue((root / "compose.yaml").is_file())
+            self.assertTrue((root / "secrets/api_token").is_file())
+            self.assertEqual((root / "secrets").stat().st_mode & 0o777, 0o700)
+            self.assertIn("outpost deploy", result.stdout)
+            self.assertEqual(json.loads((root / "outpost.json").read_text())["host"], "example")
+            rerun = subprocess.run([sys.executable, str(cli), "init", "--domain", "api.example.com", "--host", "example", "--name", "smoke"], cwd=directory, text=True, capture_output=True)
+            self.assertNotEqual(rerun.returncode, 0)
+            self.assertIn("already contains Outpost files", rerun.stderr)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.database = Path(self.directory.name) / "app.sqlite3"
