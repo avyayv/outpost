@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="390" viewBox="0 0 1000 390" role="img" aria-labelledby="title description">
+  <title id="title">A small home for your backend</title>
+  <desc id="description">HTTPS requests pass through your existing Traefik proxy to a Python API container and SQLite on a persistent volume. Backups are downloaded to your workstation.</desc>
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#23352f" stroke-width="0.5"/></pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="m0 0 10 5-10 5z" fill="#50d9ad"/></marker>
+  </defs>
+  <rect width="1000" height="390" rx="14" fill="#101714"/>
+  <rect width="1000" height="390" rx="14" fill="url(#grid)" opacity="0.65"/>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="40" y="45" fill="#50d9ad" font-size="12" letter-spacing="2">OUTPOST / SINGLE-NODE BACKEND</text>
+    <text x="40" y="86" fill="#ecf5f0" font-size="27" font-weight="600">Your API. Your data. Your server.</text>
+    <rect x="265" y="115" width="695" height="155" rx="8" fill="#14221c" stroke="#324b3e" stroke-dasharray="5 5"/>
+    <text x="285" y="139" fill="#91a79b" font-size="11" letter-spacing="1">YOUR EXISTING SERVER</text>
+    <rect x="40" y="162" width="180" height="80" rx="6" fill="#18231e" stroke="#3b5146"/>
+    <text x="60" y="193" fill="#ecf5f0" font-size="18">Client</text>
+    <text x="60" y="219" fill="#91a79b" font-size="12">HTTPS + bearer token</text>
+    <rect x="290" y="162" width="180" height="80" rx="6" fill="#18231e" stroke="#3b5146"/>
+    <text x="310" y="193" fill="#ecf5f0" font-size="18">Traefik</text>
+    <text x="310" y="219" fill="#91a79b" font-size="12">Routing + TLS</text>
+    <rect x="535" y="162" width="180" height="80" rx="6" fill="#183127" stroke="#50d9ad"/>
+    <text x="555" y="193" fill="#ecf5f0" font-size="18">Python API</text>
+    <text x="555" y="219" fill="#91a79b" font-size="12">Docker container</text>
+    <rect x="780" y="162" width="155" height="80" rx="6" fill="#18231e" stroke="#3b5146"/>
+    <text x="798" y="193" fill="#ecf5f0" font-size="18">SQLite</text>
+    <text x="798" y="219" fill="#91a79b" font-size="12">Persistent volume</text>
+    <g fill="none" stroke="#50d9ad" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M220 202h60"/><path d="M470 202h55"/><path d="M715 202h55"/>
+      <path d="M625 242v65H225" stroke-dasharray="5 5"/>
+    </g>
+    <rect x="40" y="284" width="180" height="46" rx="6" fill="#18231e" stroke="#3b5146"/>
+    <text x="60" y="312" fill="#ecf5f0" font-size="14">Your workstation</text>
+    <text x="350" y="299" fill="#91a79b" font-size="12">Consistent backup download</text>
+    <text x="40" y="365" fill="#91a79b" font-size="11">NO DATABASE SERVICE. NO EXTRA PROXY. BRING YOUR EXISTING DOCKER + TRAEFIK HOST.</text>
+  </g>
+</svg>

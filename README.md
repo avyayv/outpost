@@ -1,102 +1,139 @@
-# Outpost
+<p align="center">
+  <img src="docs/media/outpost-mark.svg" alt="Outpost" width="80">
+</p>
 
-A minimal, self-hosted JSON API starter for a Hetzner server that already runs Docker Compose and Traefik. **No cloud account, framework, database service, or extra reverse proxy.** Python's standard library API, SQLite on a persistent Docker volume, one bearer token, HTTPS through the existing Traefik.
+<h1 align="center">Outpost</h1>
 
-Outpost is a starting point, not a general-purpose backend platform. The included example is a small notes API. Extend its routes and schema for your app; don't expose arbitrary SQL.
+<p align="center">
+  <b>A small home for your backend.</b><br>
+  A starter repo for a single-server SQLite API. Keep the infrastructure boring.
+</p>
 
-## Requirements
+<p align="center">
+  <a href="#deploy-your-api"><img src="https://img.shields.io/badge/Deploy_Your_API-Get_Started-0f9d76?style=for-the-badge" alt="Deploy your API — get started"></a>
+  <a href="docs/operations.md"><img src="https://img.shields.io/badge/Run_It_Yourself-Operations_Guide-111111?style=for-the-badge" alt="Run it yourself — operations guide"></a>
+</p>
 
-- A Linux host with Docker Engine, Compose v2, and an existing Docker network named `traefik-network`.
-- Traefik watches Docker labels and has entrypoints `websecure` and certificate resolver `letsencrypt` (as on Avyay's current host). For another setup, edit the labels in `compose.yaml`.
-- A DNS A/AAAA record for your chosen subdomain pointing to the server. Certificate issuance requires publicly reachable ports 80/443 and valid DNS.
-- From your workstation: Docker, Python 3, SSH, and an SSH config alias to the server. **Do not run Outpost on the shared server itself.** The CLI's source and local backup files belong on your workstation.
+<p align="center">
+  <a href="https://github.com/avyayv/outpost/actions/workflows/ci.yml"><img src="https://github.com/avyayv/outpost/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
+  <a href="#the-example-api">API</a> ·
+  <a href="#back-up-your-data">Backups</a> ·
+  <a href="#make-it-yours">Make it yours</a>
+</p>
 
-No changes are made to the server by `init`. `deploy` checks prerequisites and refuses to adopt an unmarked app directory, then uploads only this app and starts its Compose project. It does not install or change Docker, firewall, Traefik, or DNS.
+<p align="center">
+  <img src="docs/media/outpost-flow.svg" alt="Outpost request flow: HTTPS requests reach your existing Traefik proxy, then a Python API container, then SQLite in a persistent Docker volume. Backups are downloaded to your workstation." width="100%">
+</p>
 
-## First deploy
+Not every app needs a backend platform. Sometimes you need a few endpoints, a database file, and a way to deploy without piecing the same setup together again.
 
-Run from this checkout on your workstation:
+Outpost is a **starter repo**, not a hosted service. It ships a token-protected notes API, persistent SQLite storage, and a small CLI for SSH deployment, status, logs, backup, and restore. Python's standard library handles the API; Docker Compose handles the service; your existing Traefik handles HTTPS.
+
+**Built for a single server with modest traffic.** No auth platform, public-client security model, or automatic backup schedule is included. Keep the shared token in trusted clients or server-side code—not a public app bundle.
+
+## Deploy your API
+
+**Bring an existing server, not a blank VPS.** On the server, you need Docker Compose v2 and Traefik configured with the `traefik-network` Docker network, `websecure` entrypoint, and `letsencrypt` certificate resolver. On your workstation, you need Python 3, Docker with Compose v2, and working non-interactive SSH access. The SSH user must be able to create `/srv/outpost` and run Docker. See the [setup requirements](docs/operations.md#requirements).
+
+Clone and configure from your **workstation**:
 
 ```sh
-./outpost init --domain api.example.com --host hetzner --name myapp
+git clone https://github.com/avyayv/outpost.git
+cd outpost
+./outpost init --domain api.example.com --host user@your-server --name myapp
 ```
 
-Use an SSH config alias, or `user@host`. This creates ignored local files: `.env`, `outpost.json`, and `secrets/api_token`. The token is random (256 bits); keep it private and back it up safely. It is passed as a read-only Docker secret, not an environment variable. Do not commit it, paste it into app bundles, or put it in a URL.
+Replace the domain with yours and the host with your SSH alias or `user@hostname`. `init` only creates local configuration and a random token; **it does not touch the server**.
 
-Set `api.example.com` DNS to your server's IP, then:
+Point the domain's DNS A/AAAA record at the server. Make sure ports 80 and 443 are reachable for HTTPS certificate issuance. Then deploy:
 
 ```sh
 ./outpost deploy
 ./outpost status
 ```
 
-Verify from your workstation after DNS propagates and Traefik obtains a certificate:
+Outpost uploads the app into `/srv/outpost/myapp`, builds its container on the server, and waits for a `/healthz` check inside the container. That check doesn't test DNS, Traefik routing, or your HTTPS certificate. It doesn't install Docker, configure Traefik, change your firewall, or set DNS. Verify HTTPS separately:
 
 ```sh
 curl -i https://api.example.com/healthz
-TOKEN="$(tr -d '\n' < secrets/api_token)"
-curl -i -H "Authorization: Bearer $TOKEN" https://api.example.com/api/notes
-curl -i -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  --data '{"text":"first note"}' https://api.example.com/api/notes/demo
+# Expected: HTTP 200 and {"ok": true}
 ```
 
-`/healthz` intentionally exposes only whether the service and DB respond. **All `/api/*` requests require the bearer token.** Clients must call from a trusted server, or have a carefully designed per-user auth layer. A shared token embedded in a public web/mobile app can be extracted; bearer auth alone is not suitable for untrusted public clients. Do not send sensitive tokens over HTTP.
+## The example API
 
-## Example API
-
-- `GET /healthz` → `{"ok": true}` (no auth; no data returned)
-- `GET /api/notes?limit=100&offset=0` → `{"notes": [...]}` (token required; limit 1–1000)
-- `PUT /api/notes/{id}` with `{"text":"..."}` → `{"note": ...}` (upsert; ID 1–100 ASCII letters, digits, `_`, `-`; text 1–10,000 chars)
-- `DELETE /api/notes/{id}` → `{"deleted": true}`; missing ID returns 404.
-
-Errors are JSON. Invalid input returns 400; missing/invalid token 401. API responses are not cacheable. There is no CORS allowance, cookie auth, user management, rate limiting, or multi-tenant isolation. Don't expose a shared API token in browser code.
-
-## Change the example
-
-- `api/server.py` owns HTTP routes and validation. Keep auth checks on all data routes.
-- `api/store.py` owns SQLite operations. Use parameterized queries; never interpolate user values into SQL.
-- Database initialization in `Store` uses `PRAGMA user_version`. Add numbered migrations in sequence and fail closed on an unknown future schema; never silently reset persistent data.
-- Add tests under `tests/`; run `python3 -m unittest discover -s tests -v`.
-
-SQLite is configured for WAL and full synchronous writes. There is one API process; SQLite serializes writes. It is suitable for modest single-node workloads, not multiple independent writers across hosts. Don't put its volume on NFS or share the live DB file. Persistent volume is called `data` in the Compose project; deleting that volume destroys production data.
-
-## Deploy and operate
+Write a note, read it back, delete it. All data routes require the bearer token generated by `init`.
 
 ```sh
-./outpost deploy             # build locally, upload app, start/wait for API health
-./outpost status
-./outpost logs               # last 100 API log lines
-./outpost backup ./backups/manual.sqlite3
-./outpost restore ./backups/manual.sqlite3 --yes
+TOKEN="$(tr -d '\n' < secrets/api_token)"
+
+curl -X PUT https://api.example.com/api/notes/hello \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"text":"Hello from my own server."}'
+
+curl https://api.example.com/api/notes \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -X DELETE https://api.example.com/api/notes/hello \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
-`deploy` uses the source in this checkout. Commit code before deploying and retain a known-good revision; the tool does not roll back an unsuccessful release automatically. The SQLite volume is untouched by rebuilds. Keep the same `outpost.json` directory/name for this app; do not change `COMPOSE_PROJECT_NAME` after deployment, since that changes the volume identity.
+| Endpoint | What it does |
+| --- | --- |
+| `GET /healthz` | Public service/DB availability check; returns no records |
+| `GET /api/notes?limit=100&offset=0` | List notes, with pagination |
+| `PUT /api/notes/{id}` | Create or replace a note with `{"text":"..."}` |
+| `DELETE /api/notes/{id}` | Delete a note; missing IDs return 404 |
 
-Backups are **not scheduled automatically**. A backup saved only on the Hetzner host does not protect against host/disk loss. `./outpost backup` streams a consistent SQLite online snapshot to your workstation, without stopping the service. Store backups in encrypted/off-site storage, restrict file permissions, and periodically test restore. Example daily workstation cron (choose a protected destination and retention policy):
+The database is a file in a **persistent Docker volume**. Rebuilding the API doesn't delete it; deleting the volume does. `--name myapp` sets the Compose project to `outpost-myapp` and its data volume to `outpost-myapp_data`. Use a separate checkout and a different name/domain for each app. See [API limits and storage details](docs/operations.md#example-api).
 
-```cron
-17 3 * * * cd /path/to/outpost && ./outpost backup /secure/offsite/outpost-$(date +\%F).sqlite3 >> /secure/offsite/outpost-backup.log 2>&1
-```
+## Deploy changes
 
-The command refuses to overwrite an existing file; arrange retention separately. Check logs and monitor backups—cron itself doesn't ensure successful off-machine storage.
-
-Restore **replaces the database contents**. Outpost first downloads a pre-restore snapshot to the workstation `backups/` folder, validates the selected SQLite file, stops the API, restores, and restarts. The API is briefly unavailable. Verify the result afterwards. Keep the input backup; never restore into a running API. The restore script requires this app's schema and rejects unrecognized/corrupt files. Test with disposable data before relying on it.
-
-## Security / recovery checklist
-
-- HTTPS and a correctly configured DNS record before sending tokens.
-- Keep SSH access restricted, update the host, and firewall inbound access to only required ports (typically SSH, 80, 443). Outpost does not configure firewall rules.
-- Token and `outpost.json` are ignored by Git. The token file is readable inside the container but mounted read-only; host-side `secrets/` directory is mode 0700. Avoid sharing accounts or untrusted local users.
-- Backups are sensitive data. Encrypt at rest and keep them off the server. Have a second copy of token/config; losing the token requires deliberate rotation and client update.
-- Review `./outpost logs`; HTTP access logs intentionally omit paths and authorization headers.
-- Test backup restore before storing important data. Host snapshots are useful but not a substitute for a tested off-host backup.
-
-## Development
+Edit the app, test it, deploy again:
 
 ```sh
 python3 -m unittest discover -s tests -v
-docker compose config --quiet
+./outpost deploy
+./outpost status
+./outpost logs
+```
+
+Deploys use the code in your local checkout. Commit a known-good version before deploying. There's no automatic rollback, and changing the app's Compose project name changes which volume it uses.
+
+## Back up your data
+
+```sh
+./outpost backup ./backups/2026-01-01.sqlite3
+./outpost restore ./backups/2026-01-01.sqlite3 --yes
+```
+
+`backup` downloads a consistent SQLite snapshot to your workstation while the API keeps running. It refuses to overwrite an existing backup and doesn't leave partial files behind on failure.
+
+`restore` validates the backup, downloads a pre-restore snapshot, stops the API, replaces its database contents, and restarts it. **Restore causes downtime and replaces current records.** Test it on disposable data first.
+
+Backups aren't scheduled for you. Keep encrypted copies off the server, monitor the schedule you choose, and practice recovery. The [operations guide](docs/operations.md#deploy-and-operate) includes a cron example and recovery checklist.
+
+## Make it yours
+
+The notes API is the starting point—not a schema you have to keep. Add your own routes and validation in [`api/server.py`](api/server.py), queries and versioned schema migrations in [`api/store.py`](api/store.py), and tests under [`tests/`](tests/).
+
+Use parameterized queries, preserve authentication on every data route, and plan migrations before changing persistent data. The backup validator in [`api/backup.py`](api/backup.py) also needs to match your schema.
+
+## Know the boundaries
+
+- **Trusted clients only by default.** A shared bearer token is not per-user auth. Tokens embedded in public browser/mobile apps can be extracted. There's no CORS allowance or rate limiter.
+- **One server, one database.** SQLite serializes writes. This isn't a multi-node backend; don't share the live DB file over NFS.
+- **You operate the host.** DNS, HTTPS prerequisites, firewall rules, updates, monitoring, and off-site backups remain your responsibility.
+- **No platform migration.** Outpost doesn't move an existing app or its data for you. Start a new service or write and test an explicit migration.
+
+## Development
+
+No third-party Python packages are required.
+
+```sh
+python3 -m unittest discover -s tests -v
+./outpost --help
 docker build -t outpost-api .
 ```
 
-All tests run locally against temporary DBs and a loopback HTTP server; they do not connect to Hetzner or alter production state.
+Tests use temporary databases and a loopback HTTP server. They do not connect to your production server. Read the [operations guide](docs/operations.md) for deployment configuration, security, backups, and recovery.

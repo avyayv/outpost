@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80" role="img" aria-label="Outpost mark">
+  <rect width="80" height="80" rx="16" fill="#111816"/>
+  <path d="M24 60V30l16-12 16 12v30H24Z" fill="none" stroke="#50d9ad" stroke-width="3"/>
+  <path d="M32 60V44h16v16M24 34h32M34 26h12" fill="none" stroke="#50d9ad" stroke-width="3"/>
+  <circle cx="40" cy="37" r="2" fill="#50d9ad"/>
+</svg>
