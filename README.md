@@ -21,6 +21,8 @@
   <a href="#make-it-yours">Make it yours</a>
 </p>
 
+<p align="center"><sub>macOS · Linux · Python · SQLite · Docker Compose · Traefik</sub></p>
+
 <p align="center">
   <img src="docs/media/outpost-flow.svg" alt="Outpost request flow: HTTPS requests reach your existing Traefik proxy, then a Python API container, then SQLite in a persistent Docker volume. Backups are downloaded to your workstation." width="100%">
 </p>
@@ -35,24 +37,34 @@ Outpost is a **starter repo**, not a hosted service. It ships a token-protected 
 
 **Bring an existing server, not a blank VPS.** On the server, you need Docker Compose v2 and Traefik configured with the `traefik-network` Docker network, `websecure` entrypoint, and `letsencrypt` certificate resolver. On your workstation, you need Python 3, Docker with Compose v2, and working non-interactive SSH access. The SSH user must be able to create `/srv/outpost` and run Docker. See the [setup requirements](docs/operations.md#requirements).
 
-Clone and configure from your **workstation**:
+Install the CLI on your **workstation** (macOS or Linux):
 
 ```sh
-git clone https://github.com/avyayv/outpost.git
-cd outpost
-./outpost init --domain api.example.com --host user@your-server --name myapp
+curl -fsSL https://raw.githubusercontent.com/avyayv/outpost/main/install.sh | sh
 ```
 
-Replace the domain with yours and the host with your SSH alias or `user@hostname`. `init` only creates local configuration and a random token; **it does not touch the server**.
+The installer puts the command in `~/.local/bin/outpost` and its runtime files in `~/.local/share/outpost`. It doesn't need `sudo`. If the installer says `outpost` isn't on your `PATH`, follow its printed shell-profile instruction and open a new terminal.
+
+Create your app in a **new, empty directory**. `init` asks for your domain, SSH host, and app name; or pass them as flags for scripts:
+
+```sh
+mkdir my-api && cd my-api
+outpost init
+# API domain: api.example.com
+# SSH host [hetzner]: hetzner
+# App name [myapp]: myapp
+```
+
+That generates the API starter files and a private token right here in `my-api`. Prefer non-interactive setup? `outpost init --domain api.example.com --host user@your-server --name myapp`. Initialization only writes local files; **it does not touch the server**.
 
 Point the domain's DNS A/AAAA record at the server. Make sure ports 80 and 443 are reachable for HTTPS certificate issuance. Then deploy:
 
 ```sh
-./outpost deploy
-./outpost status
+outpost deploy
+outpost status
 ```
 
-Outpost uploads the app into `/srv/outpost/myapp`, builds its container on the server, and waits for a `/healthz` check inside the container. That check doesn't test DNS, Traefik routing, or your HTTPS certificate. It doesn't install Docker, configure Traefik, change your firewall, or set DNS. Verify HTTPS separately:
+Outpost uploads the generated app into `/srv/outpost/myapp`, builds its container on the server, and waits for a `/healthz` check inside the container. That check doesn't test DNS, Traefik routing, or your HTTPS certificate. It doesn't install Docker, configure Traefik, change your firewall, or set DNS. Verify HTTPS separately:
 
 ```sh
 curl -i https://api.example.com/healthz
@@ -103,8 +115,8 @@ Deploys use the code in your local checkout. Commit a known-good version before 
 ## Back up your data
 
 ```sh
-./outpost backup ./backups/2026-01-01.sqlite3
-./outpost restore ./backups/2026-01-01.sqlite3 --yes
+outpost backup ./backups/2026-01-01.sqlite3
+outpost restore ./backups/2026-01-01.sqlite3 --yes
 ```
 
 `backup` downloads a consistent SQLite snapshot to your workstation while the API keeps running. It refuses to overwrite an existing backup and doesn't leave partial files behind on failure.
@@ -132,7 +144,7 @@ No third-party Python packages are required.
 
 ```sh
 python3 -m unittest discover -s tests -v
-./outpost --help
+outpost --help
 docker build -t outpost-api .
 ```
 

@@ -11,25 +11,25 @@ Outpost is a starting point, not a general-purpose backend platform. The include
 - A Linux host with Docker Engine, Compose v2, and an existing Docker network named `traefik-network`.
 - Traefik watches Docker labels and has entrypoints `websecure` and certificate resolver `letsencrypt` (the reference configuration). For another setup, edit the labels in `compose.yaml`.
 - A DNS A/AAAA record for your chosen subdomain pointing to the server. Certificate issuance requires publicly reachable ports 80/443 and valid DNS.
-- From your workstation: Docker with Compose v2, Python 3, SSH, and an SSH config alias or `user@hostname` for the server. The SSH user needs permission to create `/srv/outpost` and run Docker. **Do not run Outpost on the shared server itself.** The CLI's source and local backup files belong on your workstation.
+- From your workstation: Docker with Compose v2, Python 3, SSH, and an SSH config alias or `user@hostname` for the server. Install the CLI with `curl -fsSL https://raw.githubusercontent.com/avyayv/outpost/main/install.sh | sh` (macOS/Linux); the installer is optional if you clone the repo and run its `outpost` script directly. The SSH user needs permission to create `/srv/outpost` and run Docker. **Do not run Outpost on the shared server itself.** The CLI's source and local backup files belong on your workstation.
 
 No changes are made to the server by `init`. `deploy` checks prerequisites and refuses to adopt an unmarked app directory, then uploads only this app and starts its Compose project. It does not install or change Docker, firewall, Traefik, or DNS.
 
 ## First deploy
 
-Run from this checkout on your workstation:
+Install from your workstation, then create a project in a new, empty directory. The CLI installer is for macOS/Linux; Outpost itself has no platform-specific dependencies beyond its listed tools.
 
 ```sh
-./outpost init --domain api.example.com --host user@your-server --name myapp
+outpost init --domain api.example.com --host user@your-server --name myapp
 ```
 
-Use an SSH config alias, or `user@host`. This creates ignored local files: `.env`, `outpost.json`, and `secrets/api_token`. The token is random (256 bits); keep it private and back it up safely. It is passed as a read-only Docker secret, not an environment variable. Do not commit it, paste it into app bundles, or put it in a URL.
+Or run `outpost init` interactively to answer prompts for the domain, SSH host (defaults to `hetzner`), and app name (defaults to `myapp`). Init scaffolds the starter into the current, empty directory and creates `.env`, `outpost.json`, and `secrets/api_token`. The token is random (256 bits); keep it private and back it up safely. It is passed as a read-only Docker secret, not an environment variable. Do not commit it, paste it into app bundles, or put it in a URL.
 
 Set `api.example.com` DNS to your server's IP, then:
 
 ```sh
-./outpost deploy
-./outpost status
+outpost deploy
+outpost status
 ```
 
 Verify from your workstation after DNS propagates and Traefik obtains a certificate:
@@ -65,16 +65,16 @@ SQLite is configured for WAL and full synchronous writes. There is one API proce
 ## Deploy and operate
 
 ```sh
-./outpost deploy             # upload source, build on server, wait for API health
-./outpost status
-./outpost logs               # last 100 API log lines
-./outpost backup ./backups/manual.sqlite3
-./outpost restore ./backups/manual.sqlite3 --yes
+outpost deploy             # upload source, build on server, wait for API health
+outpost status
+outpost logs               # last 100 API log lines
+outpost backup ./backups/manual.sqlite3
+outpost restore ./backups/manual.sqlite3 --yes
 ```
 
 `deploy` uses the source in this checkout. Commit code before deploying and retain a known-good revision; the tool does not roll back an unsuccessful release automatically. The SQLite volume is untouched by rebuilds. Keep the same `outpost.json` directory/name for this app; do not change `COMPOSE_PROJECT_NAME` after deployment, since that changes the volume identity.
 
-Backups are **not scheduled automatically**. A backup saved only on the Hetzner host does not protect against host/disk loss. `./outpost backup` streams a consistent SQLite online snapshot to your workstation, without stopping the service. Store backups in encrypted/off-site storage, restrict file permissions, and periodically test restore. Example daily workstation cron (choose a protected destination and retention policy):
+Backups are **not scheduled automatically**. A backup saved only on the Hetzner host does not protect against host/disk loss. `outpost backup` streams a consistent SQLite online snapshot to your workstation, without stopping the service. Store backups in encrypted/off-site storage, restrict file permissions, and periodically test restore. Example daily workstation cron (choose a protected destination and retention policy):
 
 ```cron
 17 3 * * * cd /path/to/outpost && ./outpost backup /secure/offsite/outpost-$(date +\%F).sqlite3 >> /secure/offsite/outpost-backup.log 2>&1

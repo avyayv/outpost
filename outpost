@@ -14,8 +14,10 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+SOURCE_ROOT = Path(__file__).resolve().parent
+ROOT = Path.cwd().resolve()
 CONFIG = ROOT / "outpost.json"
+SCAFFOLD = ("api", "tests", "Dockerfile", "compose.yaml", ".dockerignore", ".gitignore")
 
 
 def ssh(config, command, **kwargs):
@@ -47,10 +49,10 @@ def backup(config, destination):
 def main():
     parser = argparse.ArgumentParser(description="Deploy a SQLite API to an existing Docker/Traefik server")
     commands = parser.add_subparsers(dest="command", required=True)
-    init = commands.add_parser("init", help="Create local config and a secret; makes no remote changes")
-    init.add_argument("--domain", required=True)
-    init.add_argument("--host", default="hetzner", help="SSH config alias")
-    init.add_argument("--name", default="notes")
+    init = commands.add_parser("init", help="Scaffold an API app here and configure it; makes no remote changes")
+    init.add_argument("--domain", help="API hostname, e.g. api.example.com")
+    init.add_argument("--host", help="SSH alias or user@server (default: hetzner)")
+    init.add_argument("--name", help="App name used for its container and database volume")
     for name in ("deploy", "status", "logs"):
         commands.add_parser(name)
     export = commands.add_parser("backup", help="Download a consistent backup to this machine")
@@ -60,14 +62,36 @@ def main():
     restore.add_argument("--yes", action="store_true", help="Confirm replacing all current records")
     args = parser.parse_args()
     if args.command == "init":
-        if any((ROOT / path).exists() for path in ("outpost.json", ".env", "secrets/api_token")):
-            parser.error("Already configured; edit outpost.json/.env manually, do not regenerate the token")
-        if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", args.name):
+        def answer(value, prompt, default=None):
+            if value:
+                return value
+            suffix = f" [{default}]" if default else ""
+            try:
+                return input(f"{prompt}{suffix}: ").strip() or default
+            except EOFError:
+                parser.error(f"{prompt} is required in non-interactive mode")
+
+        domain = answer(args.domain, "API domain (e.g. api.example.com)")
+        host = answer(args.host, "SSH host", "hetzner")
+        name = answer(args.name, "App name", "myapp")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", name):
             parser.error("Name must be lowercase letters/digits/hyphens, starting with a letter (max 40)")
-        if len(args.domain) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+", args.domain):
+        if len(domain) > 253 or not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+", domain):
             parser.error("Expected a lowercase DNS hostname")
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", args.host):
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*", host):
             parser.error("Expected an SSH alias or user@hostname")
+        existing = [path for path in (*SCAFFOLD, "outpost.json", ".env", "secrets") if (ROOT / path).exists()]
+        if existing:
+            parser.error("This directory already contains Outpost files: " + ", ".join(existing) + ". Run init in an empty app directory.")
+        for item in SCAFFOLD:
+            source = SOURCE_ROOT / item
+            destination = ROOT / item
+            if source.is_dir():
+                import shutil
+                shutil.copytree(source, destination, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            else:
+                import shutil
+                shutil.copy2(source, destination)
         if (ROOT / "secrets").exists():
             parser.error("secrets/ exists already; inspect it manually before initializing")
         (ROOT / "secrets").mkdir(mode=0o700)
@@ -76,9 +100,9 @@ def main():
         fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         with os.fdopen(fd, "w") as stream:
             stream.write(secrets.token_hex(32) + "\n")
-        (ROOT / ".env").write_text(f"COMPOSE_PROJECT_NAME=outpost-{args.name}\nAPP_DOMAIN={args.domain}\n")
-        CONFIG.write_text(json.dumps({"host": args.host, "directory": f"/srv/outpost/{args.name}"}, indent=2) + "\n")
-        print("Configured locally. Set DNS, then run ./outpost deploy. Token is in secrets/api_token.")
+        (ROOT / ".env").write_text(f"COMPOSE_PROJECT_NAME=outpost-{name}\nAPP_DOMAIN={domain}\n")
+        CONFIG.write_text(json.dumps({"host": host, "directory": f"/srv/outpost/{name}"}, indent=2) + "\n")
+        print(f"\nCreated your Outpost app in {ROOT}\n  API:  https://{domain}\n  Host: {host}:/srv/outpost/{name}\n\nNext: point {domain} DNS at your server, then run:\n  outpost deploy\n\nAPI token saved in secrets/api_token. Keep it private.")
         return
     if not CONFIG.exists():
         parser.error("Run ./outpost init first")

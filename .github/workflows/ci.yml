@@ -20,7 +20,12 @@ jobs:
       - name: Check CLI and Compose configuration
         run: |
           ./outpost --help
-          ./outpost init --domain api.example.com --host example --name smoke
+          mkdir "$RUNNER_TEMP/outpost-smoke"
+          cd "$RUNNER_TEMP/outpost-smoke"
+          "$GITHUB_WORKSPACE/outpost" init --domain api.example.com --host example --name smoke
           docker compose config --quiet
+          python3 -m unittest discover -s tests -v
+      - name: Check installer syntax
+        run: sh -n install.sh
       - name: Build container
         run: docker build -t outpost-test .
