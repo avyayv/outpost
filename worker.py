@@ -1,4 +1,4 @@
-"""Local Pi runner. A worktree is NOT a security sandbox; trusted requests only."""
+"""Local agent runner. A worktree is NOT a security sandbox; trusted requests only."""
 import fcntl
 import hashlib
 import json
@@ -44,6 +44,50 @@ def terminate(process):
             process.wait()
 
 
+def agent_command(args):
+    """Resolve locally approved argv; never read commands from change requests."""
+    import shlex
+    if args.agent_command:
+        if args.model:
+            raise ValueError('For custom commands, put model flags in --agent-command')
+        command = shlex.split(args.agent_command)
+    else:
+        agent = args.agent or 'pi'
+        if agent == 'pi':
+            command = ['pi', '--print', '--no-session', '--no-extensions', '--no-mcp', '--no-skills',
+                       '--no-prompt-templates', '--no-context-files', '--no-approve', '--tools', 'read,bash,edit,write']
+        elif agent == 'claude':
+            command = ['claude', '--print', '--no-session-persistence', '--permission-mode', 'dontAsk',
+                       '--allowedTools', 'Read,Edit,Write,Bash', '--strict-mcp-config', '--disable-slash-commands']
+        else:
+            command = ['codex', '--ask-for-approval', 'never', 'exec', '--sandbox', 'workspace-write', '--ephemeral']
+        if args.model:
+            command += ['--model', args.model]
+        if agent == 'codex':
+            command += ['-']
+    if not command or command[0] == '{prompt_file}':
+        raise ValueError('Agent command must start with an executable')
+    if any('{prompt_file}' in part and part != '{prompt_file}' for part in command):
+        raise ValueError('{prompt_file} must be a standalone argument')
+    executable = shutil.which(command[0])
+    if not executable:
+        raise ValueError('Agent executable not found: ' + command[0])
+    command[0] = executable
+    return command
+
+
+def invocation(config, prompt_file):
+    # Preserve already-configured Pi workers when the toolkit is upgraded.
+    command = config.get('agent_command')
+    if command is None:
+        command = [config['pi'], '--print', '--no-session', '--no-extensions', '--no-mcp', '--no-skills',
+                   '--no-prompt-templates', '--no-context-files', '--no-approve', '--tools', 'read,bash,edit,write']
+        if config.get('model'):
+            command += ['--model', config['model']]
+    uses_file = '{prompt_file}' in command
+    return [str(prompt_file) if part == '{prompt_file}' else part for part in command], uses_file
+
+
 def run_job(config, job, state):
     job_id = job['id']
     if not re.fullmatch(r'[a-f0-9]{32}', job_id):
@@ -62,18 +106,15 @@ def run_job(config, job, state):
     prompt_file.write_text(prompt)
     prompt_file.chmod(0o600)
     log_path = state / (job_id + '.log')
-    args = [config['pi'], '--print', '--no-session', '--no-extensions', '--no-mcp', '--no-skills', '--no-prompt-templates',
-            '--no-context-files', '--no-approve', '--tools', 'read,bash,edit,write']
-    if config.get('model'):
-        args += ['--model', config['model']]
-    # Provider auth stays in Pi's existing local config/environment, never HTTP.
-    env = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR_', 'HEALTH_', 'OUTPOST_'))}
+    args, uses_file = invocation(config, prompt_file)
+    # Provider auth stays in the agent's existing local config/environment, never HTTP.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(('HERDR_', 'OUTPOST_'))}
     deadline = time.monotonic() + config['timeout']
     process = None
     try:
         with prompt_file.open('r') as source, log_path.open('wb') as log:
             log_path.chmod(0o600)
-            for command, input_file in ((args, source), (config['test_command'], subprocess.DEVNULL)):
+            for command, input_file in ((args, subprocess.DEVNULL if uses_file else source), (config['test_command'], subprocess.DEVNULL)):
                 process = subprocess.Popen(command, cwd=worktree, env=env, stdin=input_file,
                                            stdout=log, stderr=log, start_new_session=True)
                 next_heartbeat = 0
@@ -85,7 +126,7 @@ def run_job(config, job, state):
                         next_heartbeat = time.monotonic() + 20
                     time.sleep(0.2)
                 if process.returncode:
-                    raise RuntimeError('Pi or tests failed; inspect private local log')
+                    raise RuntimeError('Agent or tests failed; inspect private local log')
         api(config, f'/_outpost/worker/{job_id}/heartbeat', {'lease': job['lease']})
         # Capture only the patch; Git pushes/production deploys are not part of this workflow.
         if git(worktree, 'status', '--porcelain'):
@@ -94,7 +135,7 @@ def run_job(config, job, state):
                 'commit', '-m', 'Implement Outpost change ' + job_id)
         commit = git(worktree, 'rev-parse', 'HEAD')
         if commit == base_commit:
-            raise RuntimeError('Pi made no code changes')
+            raise RuntimeError('Agent made no code changes')
         return {'status': 'review_ready', 'branch': branch, 'commit': commit}
     finally:
         if process is not None:
@@ -118,7 +159,7 @@ def serve(root):
                 try:
                     if pending.exists():
                         data = json.loads(pending.read_text())
-                        # A crash may have interrupted Pi. Never replay the job.
+                        # A crash may have interrupted the agent. Never replay the job.
                         result = data.get('result', {'status': 'failed', 'error': 'Worker interrupted; inspect local worktree'})
                         try:
                             api(config, f'/_outpost/worker/{data["id"]}/complete', {'lease': data['lease'], 'result': result})
@@ -160,10 +201,8 @@ def configure(root, args):
     if repo != root or git(root, 'status', '--porcelain'):
         raise ValueError('Run from the root of a clean, committed Git app repository')
     if not args.allow_local_execution:
-        raise ValueError('Pass --allow-local-execution: Pi can execute code with your user permissions; this is not sandboxed')
-    pi = shutil.which('pi')
-    if not pi:
-        raise ValueError('Install Pi and configure its model credentials first')
+        raise ValueError('Pass --allow-local-execution: the agent can execute code with your user permissions; this is not sandboxed')
+    selected_command = agent_command(args)
     domain = None
     for line in (root / '.env').read_text().splitlines():
         if line.startswith('APP_DOMAIN='):
@@ -178,7 +217,7 @@ def configure(root, args):
     if not command:
         raise ValueError('Test command is required')
     config = {'repo': str(root), 'url': 'https://' + domain, 'token_file': str(token_file),
-              'pi': pi, 'model': args.model, 'timeout': args.timeout, 'test_command': command}
+              'agent_command': selected_command, 'timeout': args.timeout, 'test_command': command}
     path = root / '.outpost-worker.json'
     path.write_text(json.dumps(config, indent=2) + '\n')
     path.chmod(0o600)

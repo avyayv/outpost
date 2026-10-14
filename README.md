@@ -125,15 +125,17 @@ outpost restore ./backups/2026-01-01.sqlite3 --yes
 
 Backups aren't scheduled for you. Keep encrypted copies off the server, monitor the schedule you choose, and practice recovery. The [operations guide](docs/operations.md#deploy-and-operate) includes a cron example and recovery checklist.
 
-## Ask Pi to build an endpoint
+## Ask your local agent to build an endpoint
 
-New apps include `POST /_outpost/changes` by default. Send a request with the separate **change token**, and a background Pi worker on your computer implements it in a Git worktree, runs tests, and commits a branch for review. It never automatically merges or deploys.
+New apps include `POST /_outpost/changes` by default. Send a request with the separate **change token**, and a background worker runs your local coding agent in a Git worktree, tests its changes, and commits a branch for review. It never automatically merges or deploys.
 
-Install [Pi](https://pi.dev), configure its model-provider login/API key locally, and verify `pi --print "Say ready"` succeeds before starting the worker. No model key is sent to Outpost.
+Use **Pi, Claude Code, Codex, or any noninteractive local CLI/wrapper**. Install/authenticate your agent locally first; no model key is sent to Outpost.
 
 ```sh
-# Commit your initialized app into Git and configure Pi locally first.
-outpost worker start --allow-local-execution
+# Commit your initialized app into Git and configure your agent locally first.
+outpost worker start --agent pi --allow-local-execution
+# Alternatives: --agent claude, --agent codex,
+# or --agent-command 'your-agent run --non-interactive' (prompt sent on stdin)
 
 CHANGE_TOKEN="$(tr -d '\n' < secrets/change_token)"
 curl https://api.example.com/_outpost/changes \
@@ -142,7 +144,7 @@ curl https://api.example.com/_outpost/changes \
   --data '{"request":"Add a tasks table and GET /api/tasks with migration and tests","idempotencyKey":"tasks-v1"}'
 ```
 
-The endpoint queues work even while your computer is offline. Local execution is opt-in: **Pi runs with your user's permissions; a Git worktree is not a sandbox.** Keep this management key private. Existing customized apps aren't silently upgraded. See the [full setup, status API, review workflow and security boundaries](docs/agent-changes.md).
+The endpoint queues work even while your computer is offline. Local execution is opt-in: **the agent runs with your user's permissions; a Git worktree is not a sandbox.** Keep this management key private. Existing customized apps aren't silently upgraded. See the [full setup, status API, review workflow and security boundaries](docs/agent-changes.md).
 
 ## Make it yours
 
