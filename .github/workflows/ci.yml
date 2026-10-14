@@ -27,5 +27,7 @@ jobs:
           python3 -m unittest discover -s tests -v
       - name: Check installer syntax
         run: sh -n install.sh
-      - name: Build container
-        run: docker build -t outpost-test .
+      - name: Build containers
+        run: |
+          docker build -t outpost-test .
+          docker build -t outpost-control-test control

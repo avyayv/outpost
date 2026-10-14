@@ -1,5 +1,6 @@
 .env
 outpost.json
+.outpost-worker.json
 secrets/
 backups/
 __pycache__/
