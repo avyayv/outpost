@@ -13,7 +13,8 @@ for command in curl tar python3; do
     fi
 done
 
-if [ -e "$BIN_DIR/outpost" ] && [ ! -L "$BIN_DIR/outpost" ]; then
+if [ -e "$BIN_DIR/outpost" ] && ! grep -Fq '# Outpost managed launcher' "$BIN_DIR/outpost" \
+    && ! printf '#!/bin/sh\nexec python3 "%s/outpost" "$@"\n' "$DATA_DIR" | cmp -s - "$BIN_DIR/outpost"; then
     printf 'outpost installer: refusing to overwrite %s\n' "$BIN_DIR/outpost" >&2
     exit 1
 fi
@@ -38,8 +39,8 @@ if [ -e "$DATA_DIR.previous" ]; then
     exit 1
 fi
 mkdir "$tmp/runtime"
-cp -R "$tmp/source/api" "$tmp/source/tests" "$tmp/source/Dockerfile" "$tmp/source/compose.yaml" \
-    "$tmp/source/.dockerignore" "$tmp/source/.gitignore" "$tmp/source/outpost" "$tmp/runtime/"
+cp -R "$tmp/source/api" "$tmp/source/control" "$tmp/source/tests" "$tmp/source/Dockerfile" "$tmp/source/compose.yaml" \
+    "$tmp/source/.dockerignore" "$tmp/source/.gitignore" "$tmp/source/outpost" "$tmp/source/worker.py" "$tmp/runtime/"
 touch "$tmp/runtime/.outpost-install"
 if [ -e "$DATA_DIR" ]; then mv "$DATA_DIR" "$DATA_DIR.previous"; fi
 if ! mv "$tmp/runtime" "$DATA_DIR"; then
@@ -49,9 +50,11 @@ fi
 rm -rf "$DATA_DIR.previous"
 
 launcher="$tmp/outpost-launcher"
+quoted_runtime="$(python3 -c 'import shlex, sys; print(shlex.quote(sys.argv[1]))' "$DATA_DIR/outpost")"
 cat > "$launcher" <<EOF
 #!/bin/sh
-exec python3 "${DATA_DIR}/outpost" "\$@"
+# Outpost managed launcher
+exec python3 ${quoted_runtime} "\$@"
 EOF
 chmod 755 "$launcher"
 install_tmp="$BIN_DIR/.outpost.$$"

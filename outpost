@@ -17,7 +17,7 @@ from pathlib import Path
 SOURCE_ROOT = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
 CONFIG = ROOT / "outpost.json"
-SCAFFOLD = ("api", "tests", "Dockerfile", "compose.yaml", ".dockerignore", ".gitignore")
+SCAFFOLD = ("api", "control", "tests", "Dockerfile", "compose.yaml", ".dockerignore", ".gitignore")
 
 
 def ssh(config, command, **kwargs):
@@ -60,7 +60,31 @@ def main():
     restore = commands.add_parser("restore", help="Back up current data, stop API, restore, restart")
     restore.add_argument("input", type=Path)
     restore.add_argument("--yes", action="store_true", help="Confirm replacing all current records")
+    worker = commands.add_parser("worker", help="Start/stop the local background coding-agent worker")
+    worker.add_argument("operation", choices=["start", "stop", "status"])
+    worker.add_argument("--allow-local-execution", action="store_true")
+    selection = worker.add_mutually_exclusive_group()
+    selection.add_argument("--agent", choices=["pi", "claude", "codex"], help="Local agent preset (default: pi)")
+    selection.add_argument("--agent-command", help="Custom noninteractive argv; prompt via stdin or standalone {prompt_file}")
+    worker.add_argument("--model", help="Model ID for the selected preset; default uses that agent's local configuration")
+    worker.add_argument("--timeout", type=int, default=1800, help="Maximum seconds per job (60–3600)")
+    worker.add_argument("--test-command", default="python3 -m unittest discover -s tests -v")
     args = parser.parse_args()
+    if args.command == "worker":
+        from worker import configure, state_dir
+        if args.operation == "start":
+            if not 60 <= args.timeout <= 3600:
+                parser.error("Timeout must be 60–3600 seconds")
+            configure(ROOT, args)
+        else:
+            state = state_dir(ROOT)
+            if args.operation == "stop":
+                (state / "stop").touch()
+                print("Stop requested; active work will be terminated and reported failed")
+            else:
+                print("Worker state/logs: " + str(state))
+                print("PID: " + ((state / "pid").read_text().strip() if (state / "pid").exists() else "not running"))
+        return
     if args.command == "init":
         def answer(value, prompt, default=None):
             if value:
@@ -95,11 +119,11 @@ def main():
         if (ROOT / "secrets").exists():
             parser.error("secrets/ exists already; inspect it manually before initializing")
         (ROOT / "secrets").mkdir(mode=0o700)
-        token = ROOT / "secrets/api_token"
         # Container UID can read; host directory is private (0700).
-        fd = os.open(token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-        with os.fdopen(fd, "w") as stream:
-            stream.write(secrets.token_hex(32) + "\n")
+        for name_of_token in ("api_token", "change_token", "worker_token"):
+            fd = os.open(ROOT / "secrets" / name_of_token, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            with os.fdopen(fd, "w") as stream:
+                stream.write(secrets.token_hex(32) + "\n")
         (ROOT / ".env").write_text(f"COMPOSE_PROJECT_NAME=outpost-{name}\nAPP_DOMAIN={domain}\n")
         CONFIG.write_text(json.dumps({"host": host, "directory": f"/srv/outpost/{name}"}, indent=2) + "\n")
         print(f"\nCreated your Outpost app in {ROOT}\n  API:  https://{domain}\n  Host: {host}:/srv/outpost/{name}\n\nNext: point {domain} DNS at your server, then run:\n  outpost deploy\n\nAPI token saved in secrets/api_token. Keep it private.")
@@ -117,7 +141,10 @@ def main():
             f"mkdir -p {directory}; chmod 700 {directory}; touch {directory}/.outpost")
         with tempfile.TemporaryFile() as archive:
             with tarfile.open(fileobj=archive, mode="w") as tar:
-                for item in ("api", "Dockerfile", "compose.yaml", ".env", "secrets/api_token"):
+                items = ["api", "Dockerfile", "compose.yaml", ".env", "secrets/api_token"]
+                if (ROOT / "control").is_dir():
+                    items += ["control", "secrets/change_token", "secrets/worker_token"]
+                for item in items:
                     tar.add(ROOT / item, arcname=item, filter=lambda info: None if "__pycache__" in info.name else info)
             archive.seek(0)
             remote(config, "tar -xf -; docker compose up -d --build --wait --wait-timeout 60", stdin=archive)

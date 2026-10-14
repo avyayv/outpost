@@ -34,11 +34,45 @@ services:
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt"
       - "traefik.http.routers.${COMPOSE_PROJECT_NAME}.service=${COMPOSE_PROJECT_NAME}"
       - "traefik.http.services.${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=8080"
+  control:
+    build: ./control
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - queue:/queue
+    secrets: [change_token, worker_token]
+    networks: [traefik-network]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-control.rule=Host(`${APP_DOMAIN}`) && PathPrefix(`/_outpost/`)"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-control.priority=1000"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-control.entrypoints=websecure"
+      - "traefik.http.routers.${COMPOSE_PROJECT_NAME}-control.tls.certresolver=letsencrypt"
+      - "traefik.http.services.${COMPOSE_PROJECT_NAME}-control.loadbalancer.server.port=8090"
 volumes:
   data:
+  queue:
 secrets:
   api_token:
     file: ./secrets/api_token
+  change_token:
+    file: ./secrets/change_token
+  worker_token:
+    file: ./secrets/worker_token
 networks:
   traefik-network:
     external: true

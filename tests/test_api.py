@@ -1,4 +1,5 @@
 import io
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -21,9 +22,9 @@ TOKEN = "a" * 64
 
 class APITest(unittest.TestCase):
     def test_init_scaffolds_an_app_from_an_installed_cli(self):
-        if Path.cwd().joinpath("outpost.json").exists():
-            self.skipTest("CLI init integration test runs in the repository, not an initialized app")
         cli = Path(__file__).resolve().parents[1] / "outpost"
+        if not cli.is_file() or Path.cwd().joinpath("outpost.json").exists():
+            self.skipTest("CLI init integration test runs in the toolkit repository, not an app worktree")
         with tempfile.TemporaryDirectory() as directory:
             env = {**os.environ, "HOME": directory}
             result = subprocess.run(
@@ -105,7 +106,7 @@ class APITest(unittest.TestCase):
         self.assertEqual(self.server.store.list_notes()[0]["text"], "original")
 
     def test_future_migration_rejected(self):
-        with sqlite3.connect(self.database) as db:
+        with closing(sqlite3.connect(self.database)) as db:
             db.execute("PRAGMA user_version=99")
         with self.assertRaises(RuntimeError):
             Store(self.database)
