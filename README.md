@@ -144,7 +144,7 @@ curl https://api.example.com/_outpost/changes \
   --data '{"request":"Add a tasks table and GET /api/tasks with migration and tests","idempotencyKey":"tasks-v1"}'
 ```
 
-The endpoint queues work even while your computer is offline. Local execution is opt-in: **the agent runs with your user's permissions; a Git worktree is not a sandbox.** Keep this management key private. Existing customized apps aren't silently upgraded. See the [full setup, status API, review workflow and security boundaries](docs/agent-changes.md).
+`idempotencyKey` is required: retries with the same key and text return the same job. The response gives a job ID; read its status with `GET /_outpost/changes/{id}` using the same token. Once started, the worker polls automatically every five seconds; queued work waits while your computer is offline. Local execution is opt-in: **the agent runs with your user's permissions; a Git worktree is not a sandbox.** Keep this management key private. Existing customized apps aren't silently upgraded. See the [full setup, status API, review workflow and security boundaries](docs/agent-changes.md).
 
 ## Make it yours
 
