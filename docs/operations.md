@@ -55,8 +55,8 @@ Errors are JSON. Invalid input returns 400; missing/invalid token 401. API respo
 
 ## Change the example
 
-- `api/server.py` owns HTTP routes and validation. Keep auth checks on all data routes.
-- `api/store.py` owns SQLite operations. Use parameterized queries; never interpolate user values into SQL.
+- `api/routes/*.py` own endpoints, validation and their tables (`migrate(db)`, optional `check(db)`). Routes require the token unless registered with `public=True`.
+- `api/server.py`, `api/store.py` and `api/app.py` are shared plumbing. Use parameterized queries; never interpolate user values into SQL.
 - Database initialization in `Store` uses `PRAGMA user_version`. Add numbered migrations in sequence and fail closed on an unknown future schema; never silently reset persistent data.
 - Add tests under `tests/`; run `python3 -m unittest discover -s tests -v`.
 

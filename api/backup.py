@@ -6,15 +6,7 @@ from contextlib import closing
 import tempfile
 from pathlib import Path
 
-
-def check(db):
-    if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-        raise ValueError("SQLite integrity check failed")
-    if db.execute("PRAGMA user_version").fetchone()[0] != 1:
-        raise ValueError("Unsupported backup schema version")
-    columns = [row[1] for row in db.execute("PRAGMA table_info(notes)")]
-    if columns != ["id", "text", "updated_at"]:
-        raise ValueError("Not an outpost notes database")
+from app import check
 
 
 def export(database, output):

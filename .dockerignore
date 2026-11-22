@@ -1,4 +1,4 @@
 *
 !api/
-!api/*.py
 !Dockerfile
+api/**/__pycache__

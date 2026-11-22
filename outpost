@@ -17,7 +17,7 @@ from pathlib import Path
 SOURCE_ROOT = Path(__file__).resolve().parent
 ROOT = Path.cwd().resolve()
 CONFIG = ROOT / "outpost.json"
-SCAFFOLD = ("api", "control", "tests", "Dockerfile", "compose.yaml", ".dockerignore", ".gitignore")
+SCAFFOLD = ("api", "control", "tests", "Dockerfile", "compose.yaml", ".dockerignore", ".gitignore", "AGENTS.md", "CLAUDE.md")
 
 
 def ssh(config, command, **kwargs):
@@ -140,7 +140,7 @@ def main():
             f"if [ -e {directory} ] && [ ! -f {directory}/.outpost ]; then echo 'Refusing to adopt an existing directory' >&2; exit 1; fi; "
             f"mkdir -p {directory}; chmod 700 {directory}; touch {directory}/.outpost")
         with tempfile.TemporaryFile() as archive:
-            with tarfile.open(fileobj=archive, mode="w") as tar:
+            with tarfile.open(fileobj=archive, mode="w", dereference=True) as tar:
                 items = ["api", "Dockerfile", "compose.yaml", ".env", "secrets/api_token"]
                 if (ROOT / "control").is_dir():
                     items += ["control", "secrets/change_token", "secrets/worker_token"]

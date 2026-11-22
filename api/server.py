@@ -1,13 +1,39 @@
+"""HTTP plumbing. You normally don't edit this; add routes in api/routes/."""
 import hmac
 import json
 import os
-import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from app import ROUTES, HTTPError, load_routes
 from store import Store
+
+
+class Request:
+    def __init__(self, handler, url, params):
+        self.method = handler.command
+        self.path = url.path
+        self.query = {key: values[-1] for key, values in parse_qs(url.query).items()}
+        self.params = params
+        self.headers = handler.headers
+        self._handler = handler
+
+    def db(self):
+        """`with req.db() as db:` gives one SQLite transaction."""
+        return self._handler.server.store.connect()
+
+    def json(self, max_bytes=1_000_000):
+        if self.headers.get("Transfer-Encoding"):
+            raise HTTPError(411, "Content-Length required")
+        size = int(self.headers.get("Content-Length", "0"))
+        if not 0 < size <= max_bytes:
+            raise HTTPError(413, f"Body must be 1–{max_bytes} bytes")
+        raw = self._handler.rfile.read(size)
+        if len(raw) != size:
+            raise ValueError("Incomplete body")
+        return json.loads(raw)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -19,7 +45,7 @@ class Handler(BaseHTTPRequestHandler):
         pass  # Do not log authorization headers or personal payloads.
 
     def respond(self, status, payload):
-        data = json.dumps(payload).encode()
+        data = json.dumps(payload, allow_nan=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -31,11 +57,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.dispatch()
 
-    def do_PUT(self):
-        self.dispatch()
-
-    def do_DELETE(self):
-        self.dispatch()
+    do_POST = do_PUT = do_PATCH = do_DELETE = do_GET
 
     def dispatch(self):
         url = urlsplit(self.path)
@@ -46,38 +68,25 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(200, {"ok": True})
             except sqlite3.Error:
                 return self.respond(503, {"error": "Database unavailable"})
-        if not hmac.compare_digest(
+        matches = [(entry, match) for entry in ROUTES if (match := entry[1].fullmatch(url.path))]
+        if not matches:
+            return self.respond(404, {"error": "Not found"})
+        found = next(((entry, match) for entry, match in matches if entry[0] == self.command), None)
+        if found is None:
+            return self.respond(405, {"error": "Method not allowed"})
+        (_, _, handler, public), match = found
+        if not public and not hmac.compare_digest(
             self.headers.get("Authorization", "").encode(),
             ("Bearer " + self.server.token).encode(),
         ):
             return self.respond(401, {"error": "Unauthorized"})
         try:
-            if self.command == "GET" and url.path == "/api/notes":
-                query = parse_qs(url.query)
-                limit = int(query.get("limit", ["100"])[0])
-                offset = int(query.get("offset", ["0"])[0])
-                if not 1 <= limit <= 1000 or offset < 0:
-                    raise ValueError("Invalid pagination")
-                return self.respond(200, {"notes": self.server.store.list_notes(limit, offset)})
-            match = re.fullmatch(r"/api/notes/([A-Za-z0-9_-]{1,100})", url.path)
-            if match and self.command == "PUT":
-                size = int(self.headers.get("Content-Length", "0"))
-                if self.headers.get("Transfer-Encoding") or not 0 < size <= 65536:
-                    return self.respond(413, {"error": "Body must be 1–65536 bytes with Content-Length"})
-                raw = self.rfile.read(size)
-                if len(raw) != size:
-                    raise ValueError("Incomplete body")
-                body = json.loads(raw)
-                if not isinstance(body, dict) or set(body) != {"text"}:
-                    raise ValueError("Expected an object with only text")
-                if not isinstance(body["text"], str) or not 1 <= len(body["text"]) <= 10000:
-                    raise ValueError("Text must be 1–10000 characters")
-                return self.respond(200, {"note": self.server.store.put_note(match[1], body["text"])})
-            if match and self.command == "DELETE":
-                deleted = self.server.store.delete_note(match[1])
-                return self.respond(200 if deleted else 404, {"deleted": deleted})
-            return self.respond(404, {"error": "Not found"})
-        except (ValueError, UnicodeError):
+            result = handler(Request(self, url, match.groupdict()))
+            status, payload = result if isinstance(result, tuple) else (200, result)
+            return self.respond(status, payload)
+        except HTTPError as error:
+            return self.respond(error.status, {"error": error.message})
+        except (ValueError, KeyError, TypeError, UnicodeError):
             return self.respond(400, {"error": "Invalid request"})
         except (TimeoutError, OSError):
             return self.respond(408, {"error": "Request timed out"})
@@ -88,9 +97,9 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(host, port, database, token):
     if len(token) < 32 or not token.isascii() or any(c.isspace() for c in token):
         raise ValueError("Token must be at least 32 ASCII characters without whitespace")
-    store = Store(database)
+    load_routes()
     server = ThreadingHTTPServer((host, port), Handler)
-    server.store = store
+    server.store = Store(database)
     server.token = token
     return server
 
