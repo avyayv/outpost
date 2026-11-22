@@ -39,7 +39,7 @@ if [ -e "$DATA_DIR.previous" ]; then
     exit 1
 fi
 mkdir "$tmp/runtime"
-cp -R "$tmp/source/api" "$tmp/source/control" "$tmp/source/tests" "$tmp/source/Dockerfile" "$tmp/source/compose.yaml" \
+cp -R "$tmp/source/api" "$tmp/source/control" "$tmp/source/AGENTS.md" "$tmp/source/CLAUDE.md" "$tmp/source/tests" "$tmp/source/Dockerfile" "$tmp/source/compose.yaml" \
     "$tmp/source/.dockerignore" "$tmp/source/.gitignore" "$tmp/source/outpost" "$tmp/source/worker.py" "$tmp/runtime/"
 touch "$tmp/runtime/.outpost-install"
 if [ -e "$DATA_DIR" ]; then mv "$DATA_DIR" "$DATA_DIR.previous"; fi

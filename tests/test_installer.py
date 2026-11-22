@@ -16,7 +16,7 @@ class InstallerTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         archive = self.root / 'release.tar.gz'
         with tarfile.open(archive, 'w:gz') as tar:
-            for item in ('outpost', 'worker.py', 'api', 'control', 'tests', 'Dockerfile', 'compose.yaml', '.gitignore', '.dockerignore'):
+            for item in ('outpost', 'worker.py', 'api', 'control', 'tests', 'Dockerfile', 'compose.yaml', '.gitignore', '.dockerignore', 'AGENTS.md', 'CLAUDE.md'):
                 tar.add(ROOT / item, arcname='outpost/' + item)
         mock = self.root / 'mock'
         mock.mkdir()

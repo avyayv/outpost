@@ -15,7 +15,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
 from backup import export, restore
 from server import make_server
-from store import Store
 
 TOKEN = "a" * 64
 
@@ -34,6 +33,8 @@ class APITest(unittest.TestCase):
             root = Path(directory)
             self.assertTrue((root / "api/server.py").is_file())
             self.assertTrue((root / "compose.yaml").is_file())
+            self.assertTrue((root / "api/routes/notes.py").is_file())
+            self.assertTrue((root / "AGENTS.md").is_file())
             self.assertTrue((root / "secrets/api_token").is_file())
             self.assertEqual((root / "secrets").stat().st_mode & 0o777, 0o700)
             self.assertIn("outpost deploy", result.stdout)
@@ -76,7 +77,6 @@ class APITest(unittest.TestCase):
         self.assertEqual(self.request("/api/notes/one", "PUT", {"text": "hello"})[0], 200)
         self.assertEqual(self.request("/api/notes/one", "PUT", {"text": "changed"})[0], 200)
         self.assertEqual(self.request("/api/notes")[1]["notes"][0]["text"], "changed")
-        self.assertEqual(Store(self.database).list_notes()[0]["text"], "changed")
         self.assertEqual(self.request("/api/notes/one", "DELETE")[0], 200)
         self.assertEqual(self.request("/api/notes/one", "DELETE")[0], 404)
 
@@ -90,26 +90,24 @@ class APITest(unittest.TestCase):
 
     def test_pagination(self):
         for index in range(3):
-            self.server.store.put_note(str(index), "note")
+            self.request(f"/api/notes/{index}", "PUT", {"text": "note"})
         self.assertEqual(len(self.request("/api/notes?limit=2&offset=1")[1]["notes"]), 2)
 
     def test_backup_restore(self):
-        self.server.store.put_note("one", "original")
+        self.request("/api/notes/one", "PUT", {"text": "original"})
         snapshot = io.BytesIO()
         export(self.database, snapshot)
-        self.server.store.put_note("one", "changed")
+        self.request("/api/notes/one", "PUT", {"text": "changed"})
         snapshot.seek(0)
         restore(self.database, snapshot)
-        self.assertEqual(self.server.store.list_notes()[0]["text"], "original")
+        self.assertEqual(self.request("/api/notes")[1]["notes"][0]["text"], "original")
         with self.assertRaises(sqlite3.DatabaseError):
             restore(self.database, io.BytesIO(b"not a database"))
-        self.assertEqual(self.server.store.list_notes()[0]["text"], "original")
+        self.assertEqual(self.request("/api/notes")[1]["notes"][0]["text"], "original")
 
-    def test_future_migration_rejected(self):
-        with closing(sqlite3.connect(self.database)) as db:
-            db.execute("PRAGMA user_version=99")
-        with self.assertRaises(RuntimeError):
-            Store(self.database)
+    def test_routing_errors(self):
+        self.assertEqual(self.request("/nope")[0], 404)
+        self.assertEqual(self.request("/api/notes", "POST", {"text": "x"})[0], 405)
 
     def test_invalid_token(self):
         with self.assertRaises(ValueError):

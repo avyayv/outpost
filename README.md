@@ -148,9 +148,9 @@ curl https://api.example.com/_outpost/changes \
 
 ## Make it yours
 
-The notes API is the starting point—not a schema you have to keep. Add your own routes and validation in [`api/server.py`](api/server.py), queries and versioned schema migrations in [`api/store.py`](api/store.py), and tests under [`tests/`](tests/).
+The notes API is the starting point—not a schema you have to keep. Each resource is one file in [`api/routes/`](api/routes/): register handlers with `@route("GET", r"/api/...")`, and put its tables in an idempotent `migrate(db)`. Copy [`api/routes/notes.py`](api/routes/notes.py) to add one; delete it if you don't need notes. Every new app also gets an [`AGENTS.md`](AGENTS.md), so a coding agent working in your app directory can add endpoints, test and deploy without extra instructions.
 
-Use parameterized queries, preserve authentication on every data route, and plan migrations before changing persistent data. The backup validator in [`api/backup.py`](api/backup.py) also needs to match your schema.
+Use parameterized queries, keep auth on data routes (it's on unless you pass `public=True`), and back up before schema changes. Add a `check(db)` to a route module if backups should validate its tables.
 
 ## Know the boundaries
 
